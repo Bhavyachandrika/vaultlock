@@ -11,11 +11,13 @@ import VaultEntry from "./pages/VaultEntry";
 import Generator from "./pages/Generator";
 import HealthCheck from "./pages/HealthCheck";
 import Profile from "./pages/Profile";
+import Login from "./pages/Login";
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
+      <Route path={"/"} component={Login} />
+      <Route path={"/login"} component={Login} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/vault"} component={Vault} />
       <Route path={"/vault/new"} component={VaultEntry} />
@@ -24,7 +26,6 @@ function Router() {
       <Route path={"/health-check"} component={HealthCheck} />
       <Route path={"/profile"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
   );
@@ -33,9 +34,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="dark"
-      >
+      <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
           <Toaster />
           <Router />

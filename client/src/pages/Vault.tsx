@@ -6,14 +6,21 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { trpc } from '@/lib/trpc';
-import { Lock, Trash2, Edit2, Copy, Plus, Search } from 'lucide-react';
+import { Lock, Trash2, Edit2, Copy, Plus, Search, Eye, EyeOff } from 'lucide-react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import MasterPasswordDialog from '@/components/MasterPasswordDialog';
+
+type ActionType = 'copy' | 'view';
 
 export default function Vault() {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
+  const [pendingAction, setPendingAction] = useState<{ id: number; type: ActionType } | null>(null);
+  const [dialogError, setDialogError] = useState('');
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<number, string>>({});
+
   const { data: entries, isLoading, refetch } = trpc.vault.list.useQuery();
   const { data: searchResults } = trpc.vault.search.useQuery(
     { query: searchQuery },
@@ -33,17 +40,57 @@ export default function Vault() {
 
   const displayEntries = (searchQuery.length > 0 ? searchResults : entries) || [];
 
-  const handleCopyPassword = async (id: number) => {
+ const fetchPassword = async (id: number) => {
+    const response = await fetch(`/api/trpc/vault.get?input=${encodeURIComponent(JSON.stringify({ json: { id } }))}`, {
+      credentials: "include",
+    });
+    const data = await response.json();
+    return data.result?.data?.json?.password || data.result?.data?.password || null;
+  };
+
+  const handleMasterPasswordConfirm = async (password: string) => {
+    setDialogError('');
     try {
-      const response = await fetch(`/api/trpc/vault.get?input=${JSON.stringify({ id })}`);
-      const data = await response.json();
-      if (data.result?.data?.password) {
-        await navigator.clipboard.writeText(data.result.data.password);
+      const verifyRes = await fetch('/api/auth/verify-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const verifyData = await verifyRes.json();
+
+      if (!verifyData.valid) {
+        setDialogError('Incorrect password. Please try again.');
+        return;
+      }
+
+      const id = pendingAction!.id;
+      const type = pendingAction!.type;
+      const pwd = await fetchPassword(id);
+
+      if (!pwd) {
+        setDialogError('Failed to retrieve password.');
+        return;
+      }
+
+      if (type === 'copy') {
+        await navigator.clipboard.writeText(pwd);
         toast.success('Password copied to clipboard');
+        setPendingAction(null);
+      } else if (type === 'view') {
+        setRevealedPasswords(prev => ({ ...prev, [id]: pwd }));
+        setPendingAction(null);
       }
     } catch (error) {
-      toast.error('Failed to copy password');
+      setDialogError('Something went wrong. Try again.');
     }
+  };
+
+  const handleHidePassword = (id: number) => {
+    setRevealedPasswords(prev => {
+      const updated = { ...prev };
+      delete updated[id];
+      return updated;
+    });
   };
 
   const handleDelete = (id: number) => {
@@ -54,8 +101,15 @@ export default function Vault() {
 
   return (
     <DashboardLayout>
+      {pendingAction !== null && (
+        <MasterPasswordDialog
+          onConfirm={handleMasterPasswordConfirm}
+          onCancel={() => setPendingAction(null)}
+          error={dialogError}
+        />
+      )}
+
       <div className="space-y-6">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -74,7 +128,6 @@ export default function Vault() {
           </Link>
         </motion.div>
 
-        {/* Search */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -91,7 +144,6 @@ export default function Vault() {
           </div>
         </motion.div>
 
-        {/* Entries List */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -123,12 +175,35 @@ export default function Vault() {
                         <p className="text-sm text-muted-foreground truncate">
                           {entry.username || entry.email || entry.website}
                         </p>
+                        {revealedPasswords[entry.id] && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <code className="text-sm bg-accent/10 text-accent px-3 py-1 rounded-lg font-mono">
+                              {revealedPasswords[entry.id]}
+                            </code>
+                            <button
+                              onClick={() => handleHidePassword(entry.id)}
+                              className="text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              Hide
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
-                        onClick={() => handleCopyPassword(entry.id)}
+                        onClick={() => { setPendingAction({ id: entry.id, type: 'view' }); setDialogError(''); }}
+                        className="p-2 hover:bg-card-foreground/10 rounded-lg transition-colors"
+                        title="View password"
+                      >
+                        {revealedPasswords[entry.id]
+                          ? <EyeOff className="w-4 h-4 text-accent" onClick={(e) => { e.stopPropagation(); handleHidePassword(entry.id); }} />
+                          : <Eye className="w-4 h-4 text-muted-foreground hover:text-accent" />
+                        }
+                      </button>
+                      <button
+                        onClick={() => { setPendingAction({ id: entry.id, type: 'copy' }); setDialogError(''); }}
                         className="p-2 hover:bg-card-foreground/10 rounded-lg transition-colors"
                         title="Copy password"
                       >
